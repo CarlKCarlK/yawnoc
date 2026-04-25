@@ -529,7 +529,11 @@ impl Conway {
         if !self.display_power_on {
             cells.resize(H * W, None);
         } else {
-            let alive_color = ALIVE_COLORS[self.color_index].css();
+            let alive_color = if matches!(self.status, Status::Searching) {
+                Rgb::new(220, 30, 30).css()
+            } else {
+                ALIVE_COLORS[self.color_index].css()
+            };
             for row in 0..H {
                 for col in 0..W {
                     cells.push(self.board.cells[row][col].then(|| alive_color.clone()));
@@ -695,6 +699,15 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
     Some(best)
 }
 
+#[tauri::command]
+fn toggle_cell(row: usize, col: usize, state: tauri::State<'_, AppState>) -> FrameDto {
+    let mut conway = state.conway.lock().expect("conway mutex poisoned");
+    if row < H && col < W {
+        conway.board.cells[row][col] ^= true;
+    }
+    conway.frame()
+}
+
 #[derive(Serialize)]
 struct FrameDto {
     width: usize,
@@ -734,7 +747,7 @@ fn main() {
         .manage(AppState {
             conway: Mutex::new(Conway::new(0x9e37_79b9)),
         })
-        .invoke_handler(tauri::generate_handler![frame, tick, press_key])
+        .invoke_handler(tauri::generate_handler![frame, tick, press_key, toggle_cell])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

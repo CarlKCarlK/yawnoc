@@ -2,6 +2,7 @@
 /dist
 /.idea
 /.vscode
+!/.vscode/settings.json
 *.log
-src-tauri/target/*
-src-tauri/target/*
+src-tauri/target/
+

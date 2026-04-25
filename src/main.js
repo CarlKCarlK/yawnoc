@@ -120,3 +120,21 @@ refresh().catch((error) => {
   console.error(error);
   status.textContent = `load failed: ${error.message ?? error}`;
 });
+
+panel.addEventListener("click", async (event) => {
+  const padding = 26;
+  const rect = panel.getBoundingClientRect();
+  // canvas logical size vs CSS display size
+  const scaleX = panel.width / rect.width;
+  const scaleY = panel.height / rect.height;
+  const lx = (event.clientX - rect.left) * scaleX;
+  const ly = (event.clientY - rect.top) * scaleY;
+  const grid = panel.width - padding * 2;
+  const cell = grid / 16;
+  const col = Math.floor((lx - padding) / cell);
+  const row = Math.floor((ly - padding) / cell);
+  if (col < 0 || col >= 16 || row < 0 || row >= 16) return;
+  const frame = await invoke("toggle_cell", { row, col });
+  renderFrame(frame);
+  status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
+});
