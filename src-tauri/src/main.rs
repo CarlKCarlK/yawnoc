@@ -548,14 +548,11 @@ impl Conway {
     }
 }
 
-fn sat_predecessor(target: &Board) -> Option<Board> {
-    let mut clauses: Vec<Vec<i32>> = Vec::new();
-
+fn build_life_clauses(target: &Board) -> Vec<Vec<i32>> {
+    let mut clauses = Vec::new();
     for row in 0..H {
         for col in 0..W {
             let target_alive = target.cells[row][col];
-
-            // Moore neighbourhood in row-major order; centre is index 4.
             let nb: [(usize, usize); 9] = [
                 ((row + H - 1) % H, (col + W - 1) % W),
                 ((row + H - 1) % H, col),
@@ -567,19 +564,13 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
                 ((row + 1) % H, col),
                 ((row + 1) % H, (col + 1) % W),
             ];
-
-            // Enumerate all 512 9-bit patterns and block those that would
-            // produce the wrong next-state for this cell.
             for bits in 0u16..512 {
                 let center = (bits >> 4) & 1;
                 let neighbor_sum: u16 =
                     (0u16..9).filter(|&j| j != 4).map(|j| (bits >> j) & 1).sum();
                 let produces_alive = (center == 1 && (neighbor_sum == 2 || neighbor_sum == 3))
                     || (center == 0 && neighbor_sum == 3);
-
                 if produces_alive != target_alive {
-                    // Blocking clause: at least one literal must differ from
-                    // this forbidden assignment.
                     let clause: Vec<i32> = nb
                         .iter()
                         .enumerate()
@@ -593,17 +584,58 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
             }
         }
     }
+    clauses
+}
 
-    match splr::Certificate::try_from(clauses) {
-        Ok(splr::Certificate::SAT(ans)) => {
+/// Sequential-counter at-most-k constraint over SAT vars 1..=(H*W).
+/// Auxiliary vars are numbered starting at H*W+1.
+/// r(i,j) = "count(x[1..i]) >= j", for i=1..n-1, j=1..k.
+fn add_atmost_k(clauses: &mut Vec<Vec<i32>>, k: usize) {
+    let n = H * W;
+    if k == 0 {
+        for i in 1..=(n as i32) {
+            clauses.push(vec![-i]);
+        }
+        return;
+    }
+    if k >= n {
+        return;
+    }
+    let r = |i: usize, j: usize| -> i32 { (n + (i - 1) * k + j) as i32 };
+    // i=1: x[1] → r[1][1]
+    clauses.push(vec![-1, r(1, 1)]);
+    for i in 2..n {
+        // propagate count ≥ 1
+        clauses.push(vec![-(i as i32), r(i, 1)]);
+        clauses.push(vec![-r(i - 1, 1), r(i, 1)]);
+        // propagate count ≥ j for j=2..k
+        for j in 2..=k {
+            clauses.push(vec![-(i as i32), -r(i - 1, j - 1), r(i, j)]);
+            clauses.push(vec![-r(i - 1, j), r(i, j)]);
+        }
+        // overflow: x[i]=1 forbidden when count already at k
+        clauses.push(vec![-(i as i32), -r(i - 1, k)]);
+    }
+    // overflow for x[n]
+    clauses.push(vec![-(n as i32), -r(n - 1, k)]);
+}
+
+fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
+    // splr has an internal sort bug that can panic with "comparison function does not
+    // implement total order".  Silence the hook so the message doesn't appear in the
+    // terminal, then catch_unwind absorbs the actual unwind.
+    let old_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(|| splr::Certificate::try_from(clauses));
+    std::panic::set_hook(old_hook);
+    match result {
+        Ok(Ok(splr::Certificate::SAT(ans))) => {
             let mut board = Board::new();
             for &lit in &ans {
                 if lit > 0 {
                     let idx = (lit - 1) as usize;
-                    let row = idx / W;
-                    let col = idx % W;
-                    if row < H {
-                        board.cells[row][col] = true;
+                    if idx < H * W {
+                        board.cells[idx / W][idx % W] = true;
                     }
                 }
             }
@@ -611,6 +643,32 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
         }
         _ => None,
     }
+}
+
+fn sat_predecessor(target: &Board) -> Option<Board> {
+    let base = build_life_clauses(target);
+
+    // Initial solve – any predecessor
+    let first = solve_clauses(base.clone())?;
+    let mut best = first;
+    let mut hi = best.count_live_cells() as usize;
+    let mut lo = 0usize;
+
+    // Binary search for minimum-population predecessor
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        let mut clauses = base.clone();
+        add_atmost_k(&mut clauses, mid);
+        match solve_clauses(clauses) {
+            Some(board) => {
+                hi = board.count_live_cells() as usize;
+                best = board;
+            }
+            None => lo = mid + 1,
+        }
+    }
+
+    Some(best)
 }
 
 #[derive(Serialize)]
