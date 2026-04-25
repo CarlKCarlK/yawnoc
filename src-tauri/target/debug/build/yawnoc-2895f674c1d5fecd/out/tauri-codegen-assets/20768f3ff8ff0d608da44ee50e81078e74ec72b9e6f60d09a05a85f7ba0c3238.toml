@@ -1,3 +1,0 @@
-(€[alias]
-app = "run --manifest-path src-tauri/Cargo.toml --target-dir target/app"
-
