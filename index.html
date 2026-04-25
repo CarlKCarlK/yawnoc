@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yawnoc</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Yawnoc</h1>
+        <p>Native Rust Conway on a virtual 16x16 LED panel</p>
+      </header>
+
+      <div class="visuals">
+        <canvas id="panel" width="640" height="640" aria-label="Conway LED panel"></canvas>
+        <div class="remote-wrapper">
+          <img id="remote" src="./public/remote.jpg" alt="IR remote control" />
+          <button class="remote-btn" data-key="cancel" data-tip="Esc - cancel search" style="left:21.5%;top:12.7%" aria-label="Cancel"></button>
+          <button class="remote-btn" data-key="mode" data-tip="M - cycle color" style="left:47.6%;top:12.7%" aria-label="Mode"></button>
+          <button class="remote-btn" data-key="play_pause" data-tip="Space - play / pause" style="left:21.5%;top:24.3%" aria-label="Play/Pause"></button>
+          <button class="remote-btn" data-key="prev" data-tip="P - predecessor search" style="left:47.6%;top:24.3%" aria-label="Predecessor Search"></button>
+          <button class="remote-btn" data-key="next" data-tip="N - next generation" style="left:73.7%;top:24.3%" aria-label="Next"></button>
+          <button class="remote-btn" data-key="speed_down" data-tip="[ - slower" style="left:47.6%;top:35.8%" aria-label="Speed Down"></button>
+          <button class="remote-btn" data-key="speed_up" data-tip="] - faster" style="left:73.7%;top:35.8%" aria-label="Speed Up"></button>
+          <button class="remote-btn" data-key="0" data-tip="0 - pattern 0" style="left:21.5%;top:47.4%" aria-label="Pattern 0"></button>
+          <button class="remote-btn" data-key="1" data-tip="1 - pattern 1" style="left:21.5%;top:58.9%" aria-label="Pattern 1"></button>
+          <button class="remote-btn" data-key="2" data-tip="2 - pattern 2" style="left:47.6%;top:58.9%" aria-label="Pattern 2"></button>
+          <button class="remote-btn" data-key="3" data-tip="3 - pattern 3" style="left:73.7%;top:58.9%" aria-label="Pattern 3"></button>
+          <button class="remote-btn" data-key="4" data-tip="4 - pattern 4" style="left:21.5%;top:70.5%" aria-label="Pattern 4"></button>
+          <button class="remote-btn" data-key="5" data-tip="5 - pattern 5" style="left:47.6%;top:70.5%" aria-label="Pattern 5"></button>
+          <button class="remote-btn" data-key="6" data-tip="6 - pattern 6" style="left:73.7%;top:70.5%" aria-label="Pattern 6"></button>
+          <button class="remote-btn" data-key="7" data-tip="7 - pattern 7" style="left:21.5%;top:82.0%" aria-label="Pattern 7"></button>
+          <button class="remote-btn" data-key="8" data-tip="8 - pattern 8" style="left:47.6%;top:82.0%" aria-label="Pattern 8"></button>
+          <button class="remote-btn" data-key="9" data-tip="9 - pattern 9" style="left:73.7%;top:82.0%" aria-label="Pattern 9"></button>
+        </div>
+      </div>
+
+      <section class="controls" aria-label="Conway controls">
+        <button data-key="play_pause">Play/Pause</button>
+        <button data-key="next">Next</button>
+        <button data-key="prev">Predecessor Search</button>
+        <button data-key="cancel">Cancel</button>
+        <button data-key="mode">Color</button>
+        <button data-key="speed_down">Slower</button>
+        <button data-key="speed_up">Faster</button>
+      </section>
+
+      <section class="patterns" aria-label="Pattern presets">
+        <button data-key="0">0</button>
+        <button data-key="1">1</button>
+        <button data-key="2">2</button>
+        <button data-key="3">3</button>
+        <button data-key="4">4</button>
+        <button data-key="5">5</button>
+        <button data-key="6">6</button>
+        <button data-key="7">7</button>
+        <button data-key="8">8</button>
+        <button data-key="9">9</button>
+      </section>
+
+      <p id="status">loading</p>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
