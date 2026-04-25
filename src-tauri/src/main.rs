@@ -1,11 +1,12 @@
 use serde::Serialize;
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const H: usize = 16;
 const W: usize = 16;
-const SEARCH_ITERATIONS_PER_STEP: u32 = 256;
-const MAX_SEARCH_ITERATIONS: u32 = 500_000;
 const STASIS_RESET_GENERATIONS: u8 = 15;
+const SAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 const ALIVE_COLORS: [Rgb; 6] = [
     Rgb::new(0, 255, 0),
@@ -193,33 +194,6 @@ impl Board {
         }
     }
 
-    fn evolves_to(&self, target: &Self) -> bool {
-        let mut next = *self;
-        next.step();
-        next == *target
-    }
-
-    fn predecessor_search_mask(&self, radius: usize) -> [[bool; W]; H] {
-        let mut mask = [[false; W]; H];
-        let radius = radius as isize;
-        for row in 0..H {
-            for col in 0..W {
-                if self.cells[row][col] {
-                    for row_delta in -radius..=radius {
-                        for col_delta in -radius..=radius {
-                            let mask_row =
-                                ((row as isize + row_delta).rem_euclid(H as isize)) as usize;
-                            let mask_col =
-                                ((col as isize + col_delta).rem_euclid(W as isize)) as usize;
-                            mask[mask_row][mask_col] = true;
-                        }
-                    }
-                }
-            }
-        }
-        mask
-    }
-
     fn add_glider(&mut self, row: usize, col: usize) {
         self.set_alive(row, col + 1);
         self.set_alive(row + 1, col + 2);
@@ -345,7 +319,8 @@ impl Board {
 struct Conway {
     board: Board,
     pattern_index: usize,
-    search: Option<PredecessorSearch>,
+    search_rx: Option<Receiver<Option<Board>>>,
+    search_start: Option<Instant>,
     paused: bool,
     display_power_on: bool,
     speed_mode: SpeedMode,
@@ -363,7 +338,8 @@ impl Conway {
         Self {
             board,
             pattern_index: 1,
-            search: None,
+            search_rx: None,
+            search_start: None,
             paused: false,
             display_power_on: true,
             speed_mode: SpeedMode::Medium,
@@ -376,8 +352,9 @@ impl Conway {
     }
 
     fn command(&mut self, key: &str) -> Status {
-        if self.search.is_some() {
-            self.search = None;
+        if self.search_rx.is_some() {
+            self.search_rx = None;
+            self.search_start = None;
             if matches!(key, "prev" | "cancel") {
                 self.status = Status::Cancelled;
                 return self.status;
@@ -402,14 +379,21 @@ impl Conway {
             }
             "prev" => {
                 if self.display_power_on {
-                    self.search = Some(PredecessorSearch::new(self.board));
+                    let target = self.board;
+                    let (tx, rx) = mpsc::channel();
+                    std::thread::spawn(move || {
+                        let _ = tx.send(sat_predecessor(&target));
+                    });
+                    self.search_rx = Some(rx);
+                    self.search_start = Some(Instant::now());
                     Status::Searching
                 } else {
                     Status::Off
                 }
             }
             "cancel" => {
-                self.search = None;
+                self.search_rx = None;
+                self.search_start = None;
                 Status::Cancelled
             }
             "mode" => {
@@ -441,18 +425,34 @@ impl Conway {
             return self.status;
         }
 
-        if let Some(search) = &mut self.search {
-            self.status = match search.advance(SEARCH_ITERATIONS_PER_STEP) {
-                SearchStep::Progress => Status::Searching,
-                SearchStep::Found(predecessor) => {
-                    self.board = predecessor;
-                    self.search = None;
+        if self.search_rx.is_some() {
+            let result = self.search_rx.as_ref().unwrap().try_recv();
+            self.status = match result {
+                Ok(Some(board)) => {
+                    self.board = board;
+                    self.search_rx = None;
+                    self.search_start = None;
                     self.stasis_tracker = (0, 0);
                     self.empty_tracker = 0;
                     Status::Found
                 }
-                SearchStep::NotFound => {
-                    self.search = None;
+                Ok(None) => {
+                    self.search_rx = None;
+                    self.search_start = None;
+                    Status::NotFound
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    if self.search_start.map_or(false, |t| t.elapsed() >= SAT_TIMEOUT) {
+                        self.search_rx = None;
+                        self.search_start = None;
+                        Status::NotFound
+                    } else {
+                        Status::Searching
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.search_rx = None;
+                    self.search_start = None;
                     Status::NotFound
                 }
             };
@@ -477,7 +477,8 @@ impl Conway {
             .add_pattern(PATTERNS[self.pattern_index], random_seed);
         self.stasis_tracker = (0, 0);
         self.empty_tracker = 0;
-        self.search = None;
+        self.search_rx = None;
+        self.search_start = None;
     }
 
     fn evaluate_auto_reset(&mut self) {
@@ -526,24 +527,6 @@ impl Conway {
         let mut cells = Vec::with_capacity(H * W);
         if !self.display_power_on {
             cells.resize(H * W, None);
-        } else if let Some(search) = &self.search {
-            let (candidate, assigned, target) = search.progress();
-            for row in 0..H {
-                for col in 0..W {
-                    let color = if assigned[row][col] {
-                        if candidate.cells[row][col] {
-                            Some(Rgb::new(255, 0, 0).css())
-                        } else {
-                            Some(Rgb::new(0, 0, 12).css())
-                        }
-                    } else if target.cells[row][col] {
-                        Some(Rgb::new(0, 10, 0).css())
-                    } else {
-                        None
-                    };
-                    cells.push(color);
-                }
-            }
         } else {
             let alive_color = ALIVE_COLORS[self.color_index].css();
             for row in 0..H {
@@ -565,172 +548,69 @@ impl Conway {
     }
 }
 
-enum SearchStep {
-    Progress,
-    Found(Board),
-    NotFound,
-}
+fn sat_predecessor(target: &Board) -> Option<Board> {
+    let mut clauses: Vec<Vec<i32>> = Vec::new();
 
-struct PredecessorSearch {
-    target: Board,
-    candidate: Board,
-    search_mask: [[bool; W]; H],
-    choices: [[u8; W]; H],
-    assigned: [[bool; W]; H],
-    depth: usize,
-    active_count: usize,
-    iteration: u32,
-}
+    for row in 0..H {
+        for col in 0..W {
+            let target_alive = target.cells[row][col];
 
-impl PredecessorSearch {
-    fn new(target: Board) -> Self {
-        let search_mask = target.predecessor_search_mask(1);
-        let mut assigned = [[true; W]; H];
-        let active_count = count_search_cells(&search_mask);
-        for row in 0..H {
-            for col in 0..W {
-                assigned[row][col] = !search_mask[row][col];
+            // Moore neighbourhood in row-major order; centre is index 4.
+            let nb: [(usize, usize); 9] = [
+                ((row + H - 1) % H, (col + W - 1) % W),
+                ((row + H - 1) % H, col),
+                ((row + H - 1) % H, (col + 1) % W),
+                (row, (col + W - 1) % W),
+                (row, col),
+                (row, (col + 1) % W),
+                ((row + 1) % H, (col + W - 1) % W),
+                ((row + 1) % H, col),
+                ((row + 1) % H, (col + 1) % W),
+            ];
+
+            // Enumerate all 512 9-bit patterns and block those that would
+            // produce the wrong next-state for this cell.
+            for bits in 0u16..512 {
+                let center = (bits >> 4) & 1;
+                let neighbor_sum: u16 =
+                    (0u16..9).filter(|&j| j != 4).map(|j| (bits >> j) & 1).sum();
+                let produces_alive = (center == 1 && (neighbor_sum == 2 || neighbor_sum == 3))
+                    || (center == 0 && neighbor_sum == 3);
+
+                if produces_alive != target_alive {
+                    // Blocking clause: at least one literal must differ from
+                    // this forbidden assignment.
+                    let clause: Vec<i32> = nb
+                        .iter()
+                        .enumerate()
+                        .map(|(j, &(nr, nc))| {
+                            let var = (nr * W + nc + 1) as i32;
+                            if (bits >> j) & 1 == 1 { -var } else { var }
+                        })
+                        .collect();
+                    clauses.push(clause);
+                }
             }
-        }
-
-        Self {
-            target,
-            candidate: Board::new(),
-            search_mask,
-            choices: [[0; W]; H],
-            assigned,
-            depth: 0,
-            active_count,
-            iteration: 0,
         }
     }
 
-    fn progress(&self) -> (Board, [[bool; W]; H], Board) {
-        (self.candidate, self.assigned, self.target)
-    }
-
-    fn advance(&mut self, budget: u32) -> SearchStep {
-        for _ in 0..budget {
-            if let Some(step) = self.advance_once() {
-                return step;
-            }
-        }
-        SearchStep::Progress
-    }
-
-    fn advance_once(&mut self) -> Option<SearchStep> {
-        if self.depth == self.active_count {
-            if self.candidate.evolves_to(&self.target) {
-                return Some(SearchStep::Found(self.candidate));
-            }
-            if self.depth == 0 {
-                return Some(SearchStep::NotFound);
-            }
-            self.depth -= 1;
-            if let Some((row, col)) = search_cell_at(&self.search_mask, self.depth) {
-                self.assigned[row][col] = false;
-            }
-            return None;
-        }
-
-        let Some((row, col)) = search_cell_at(&self.search_mask, self.depth) else {
-            return Some(SearchStep::NotFound);
-        };
-
-        let try_value = match self.choices[row][col] {
-            0 => Some(false),
-            1 => Some(true),
-            _ => None,
-        };
-
-        if let Some(value) = try_value {
-            self.choices[row][col] += 1;
-            self.candidate.cells[row][col] = value;
-            self.assigned[row][col] = true;
-
-            if check_search_constraints(&self.candidate, &self.assigned, &self.target, row, col) {
-                self.depth += 1;
-            } else {
-                self.assigned[row][col] = false;
-            }
-        } else {
-            self.choices[row][col] = 0;
-            self.assigned[row][col] = false;
-            if self.depth == 0 {
-                return Some(SearchStep::NotFound);
-            }
-            self.depth -= 1;
-            if let Some((prev_row, prev_col)) = search_cell_at(&self.search_mask, self.depth) {
-                self.assigned[prev_row][prev_col] = false;
-            }
-        }
-
-        self.iteration += 1;
-        if self.iteration >= MAX_SEARCH_ITERATIONS {
-            return Some(SearchStep::NotFound);
-        }
-
-        None
-    }
-}
-
-fn check_search_constraints(
-    candidate: &Board,
-    assigned: &[[bool; W]; H],
-    target: &Board,
-    changed_row: usize,
-    changed_col: usize,
-) -> bool {
-    for row_delta in [-1, 0, 1] {
-        for col_delta in [-1, 0, 1] {
-            let row = ((changed_row as isize + row_delta).rem_euclid(H as isize)) as usize;
-            let col = ((changed_col as isize + col_delta).rem_euclid(W as isize)) as usize;
-
-            let mut complete = true;
-            'neighborhood: for neighbor_row_offset in [-1, 0, 1] {
-                for neighbor_col_offset in [-1, 0, 1] {
-                    let neighbor_row =
-                        ((row as isize + neighbor_row_offset).rem_euclid(H as isize)) as usize;
-                    let neighbor_col =
-                        ((col as isize + neighbor_col_offset).rem_euclid(W as isize)) as usize;
-                    if !assigned[neighbor_row][neighbor_col] {
-                        complete = false;
-                        break 'neighborhood;
+    match splr::Certificate::try_from(clauses) {
+        Ok(splr::Certificate::SAT(ans)) => {
+            let mut board = Board::new();
+            for &lit in &ans {
+                if lit > 0 {
+                    let idx = (lit - 1) as usize;
+                    let row = idx / W;
+                    let col = idx % W;
+                    if row < H {
+                        board.cells[row][col] = true;
                     }
                 }
             }
-
-            if complete {
-                let live_neighbors = candidate.count_live_neighbors(row, col);
-                let alive = candidate.cells[row][col];
-                let next_alive =
-                    matches!((alive, live_neighbors), (true, 2) | (true, 3) | (false, 3));
-                if next_alive != target.cells[row][col] {
-                    return false;
-                }
-            }
+            Some(board)
         }
+        _ => None,
     }
-    true
-}
-
-fn count_search_cells(search_mask: &[[bool; W]; H]) -> usize {
-    search_mask.iter().flatten().filter(|&&cell| cell).count()
-}
-
-fn search_cell_at(search_mask: &[[bool; W]; H], target_index: usize) -> Option<(usize, usize)> {
-    let mut index = 0;
-    for (row, line) in search_mask.iter().enumerate() {
-        for (col, &is_search_cell) in line.iter().enumerate() {
-            if is_search_cell {
-                if index == target_index {
-                    return Some((row, col));
-                }
-                index += 1;
-            }
-        }
-    }
-    None
 }
 
 #[derive(Serialize)]
