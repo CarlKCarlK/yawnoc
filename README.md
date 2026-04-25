@@ -11,7 +11,7 @@ files change.
 ## Run
 
 ```sh
-cargo app
+just run
 ```
 
 or, explicitly:
@@ -22,24 +22,42 @@ cargo run --manifest-path src-tauri/Cargo.toml --target-dir target/app
 
 ## Build Windows Installer (Local)
 
-From Windows PowerShell in this repo:
+From Windows in this repo:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1
-```
-
-Or from PowerShell 7 (`pwsh`):
-
-```powershell
-pwsh -File .\scripts\build-windows-installer.ps1
+```sh
+just win-installer
 ```
 
 The installer `.exe` is written under:
 
 `target/app/release/bundle/nsis/`
 
-The script auto-installs `cargo-tauri` if missing and auto-generates icon assets.
+The recipe auto-generates icon assets and runs the installer build script.
 Make sure the running app is closed before building.
+
+## Run In Browser (WASM)
+
+Build WASM package and web output:
+
+```sh
+just wasm-build
+```
+
+Serve locally:
+
+```sh
+just wasm-serve
+```
+
+Then open:
+
+`http://localhost:4173`
+
+Notes:
+- The same UI now auto-selects backend:
+  - Tauri commands when running in desktop app.
+  - WASM module in a Web Worker when running in browser.
+- `prev` SAT predecessor search runs in browser mode too, executed inside the worker so the UI thread stays responsive.
 
 ## Build Installers In CI
 
@@ -48,8 +66,7 @@ The `Release` GitHub Actions workflow builds installers for Linux, Windows, and 
 To trigger a full release with assets attached:
 
 ```sh
-git tag v0.1.1
-git push origin v0.1.1
+just release-tag 0.1.1
 ```
 
 After CI completes, installers are attached to the GitHub Release for that tag.

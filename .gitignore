@@ -7,3 +7,6 @@
 src-tauri/target/
 src-tauri/icons/*
 !src-tauri/icons/icon.png
+/wasm/pkg
+/wasm/target
+/dist-wasm

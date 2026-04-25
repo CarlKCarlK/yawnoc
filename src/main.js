@@ -1,5 +1,3 @@
-const { invoke } = window.__TAURI__.core;
-
 const keyMap = new Map([
   [" ", "play_pause"],
   ["n", "next"],
@@ -17,6 +15,73 @@ const panel = document.querySelector("#panel");
 const status = document.querySelector("#status");
 const ctx = panel.getContext("2d");
 let tickTimer = null;
+let backend = null;
+let isPrevSearching = false;
+
+async function createBackend() {
+  if (window.__TAURI__?.core?.invoke) {
+    const { invoke } = window.__TAURI__.core;
+    return {
+      frame: () => invoke("frame"),
+      tick: () => invoke("tick"),
+      pressKey: (key) => invoke("press_key", { key }),
+      toggleCell: (row, col) => invoke("toggle_cell", { row, col }),
+    };
+  }
+
+  const makeWorker = () =>
+    new Worker(new URL("./wasm-worker.js", import.meta.url), {
+      type: "module",
+    });
+  let worker = makeWorker();
+  let requestId = 0;
+  const pending = new Map();
+
+  function attachWorkerListener(w) {
+    w.addEventListener("message", (event) => {
+      const { id, result, error } = event.data;
+      const request = pending.get(id);
+      if (!request) return;
+      pending.delete(id);
+      if (error) {
+        request.reject(new Error(error));
+        return;
+      }
+      request.resolve(result);
+    });
+  }
+  attachWorkerListener(worker);
+
+  function restartWorker() {
+    worker.terminate();
+    worker = makeWorker();
+    attachWorkerListener(worker);
+  }
+
+  const call = (cmd, args = {}, timeoutMs = 0) =>
+    new Promise((resolve, reject) => {
+      const id = requestId++;
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ id, cmd, args });
+      if (timeoutMs > 0) {
+        setTimeout(() => {
+          if (!pending.has(id)) return;
+          pending.delete(id);
+          reject(new Error("worker_timeout"));
+        }, timeoutMs);
+      }
+    });
+
+  return {
+    frame: () => call("frame"),
+    tick: () => call("tick"),
+    pressKey: (key, timeoutMs = 0) => call("pressKey", { key }, timeoutMs),
+    toggleCell: (row, col) => call("toggleCell", { row, col }),
+    getState: () => call("getState"),
+    setState: (state) => call("setState", { state }),
+    restartWorker,
+  };
+}
 
 function drawLed(ctx, x, y, size, color, alive) {
   const cx = x + size / 2;
@@ -64,7 +129,8 @@ function renderFrame(frame) {
   for (let row = 0; row < frame.height; row += 1) {
     for (let col = 0; col < frame.width; col += 1) {
       const index = row * frame.width + col;
-      const color = frame.cells[index];
+      const rawColor = frame.cells[index];
+      const color = rawColor === null ? null : (isPrevSearching ? "#dc1e1e" : rawColor);
       drawLed(ctx, padding + col * cell, padding + row * cell, cell, color, color !== null);
     }
   }
@@ -81,23 +147,70 @@ function restartTimer(intervalMs) {
   tickTimer = setInterval(tick, intervalMs);
 }
 
+function stopTimer() {
+  if (tickTimer !== null) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+}
+
+function syncTimer(frame) {
+  if (frame.status === "ok") {
+    restartTimer(frame.tick_interval_ms);
+  } else {
+    stopTimer();
+  }
+}
+
 async function refresh() {
-  const frame = await invoke("frame");
+  const frame = await backend.frame();
   renderFrame(frame);
-  restartTimer(frame.tick_interval_ms);
+  syncTimer(frame);
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
 }
 
 async function tick() {
-  const frame = await invoke("tick");
+  const frame = await backend.tick();
   renderFrame(frame);
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
 }
 
 async function handleKey(key) {
-  const frame = await invoke("press_key", { key });
+  if (key === "prev") {
+    const snapshot = await backend.getState();
+    isPrevSearching = true;
+    status.textContent = "searching";
+    stopTimer();
+    const frameBeforeSearch = await backend.frame();
+    renderFrame(frameBeforeSearch);
+    try {
+      const frame = await backend.pressKey(key, 30000);
+      isPrevSearching = false;
+      renderFrame(frame);
+      syncTimer(frame);
+      status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
+      return;
+    } catch (error) {
+      isPrevSearching = false;
+      if (error?.message === "worker_timeout") {
+        backend.restartWorker();
+        const restored = await backend.setState(snapshot);
+        if (!restored) {
+          throw new Error("search timed out and state restore failed");
+        }
+        const restoredFrame = await backend.frame();
+        renderFrame(restoredFrame);
+        syncTimer(restoredFrame);
+        status.textContent = `not_found | timeout | ${restoredFrame.live_cells} live | ${restoredFrame.speed}`;
+        return;
+      }
+      throw error;
+    }
+  }
+  const frame = await backend.pressKey(key);
+  isPrevSearching = false;
   renderFrame(frame);
-  restartTimer(frame.tick_interval_ms);
+  syncTimer(frame);
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
 }
 
@@ -116,10 +229,15 @@ for (const button of document.querySelectorAll("button[data-key]")) {
   });
 }
 
-refresh().catch((error) => {
-  console.error(error);
-  status.textContent = `load failed: ${error.message ?? error}`;
-});
+createBackend()
+  .then((createdBackend) => {
+    backend = createdBackend;
+    return refresh();
+  })
+  .catch((error) => {
+    console.error(error);
+    status.textContent = `load failed: ${error.message ?? error}`;
+  });
 
 panel.addEventListener("click", async (event) => {
   const padding = 26;
@@ -134,7 +252,7 @@ panel.addEventListener("click", async (event) => {
   const col = Math.floor((lx - padding) / cell);
   const row = Math.floor((ly - padding) / cell);
   if (col < 0 || col >= 16 || row < 0 || row >= 16) return;
-  const frame = await invoke("toggle_cell", { row, col });
+  const frame = await backend.toggleCell(row, col);
   renderFrame(frame);
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
 });
