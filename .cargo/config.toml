@@ -1,2 +1,3 @@
 [alias]
 app = "run --manifest-path src-tauri/Cargo.toml --target-dir target/app"
+win-installer = "!powershell -ExecutionPolicy Bypass -File .\\scripts\\build-windows-installer.ps1"

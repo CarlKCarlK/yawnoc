@@ -5,4 +5,5 @@
 !/.vscode/settings.json
 *.log
 src-tauri/target/
-
+src-tauri/icons/*
+!src-tauri/icons/icon.png
