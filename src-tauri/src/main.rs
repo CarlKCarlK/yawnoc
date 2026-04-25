@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -646,25 +647,48 @@ fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
 }
 
 fn sat_predecessor(target: &Board) -> Option<Board> {
-    let base = build_life_clauses(target);
+    let base = Arc::new(build_life_clauses(target));
+    let n_workers = std::thread::available_parallelism().map_or(4, |p| p.get());
 
-    // Initial solve – any predecessor
-    let first = solve_clauses(base.clone())?;
-    let mut best = first;
-    let mut hi = best.count_live_cells() as usize;
-    let mut lo = 0usize;
+    // Unconstrained solve – confirms a predecessor exists and gives first upper bound.
+    let mut best = solve_clauses((*base).clone())?;
+    let mut hi = best.count_live_cells() as usize; // have a solution with hi live cells
+    let mut lo = 0usize;                            // proven UNSAT for all counts < lo
 
-    // Binary search for minimum-population predecessor
+    // Each round spawns up to n_workers threads probing evenly-spaced bounds in [lo, hi).
+    // SAT(k) → upper bound tightens to actual count; UNSAT(k) → lower bound advances past k.
+    // Converges in O(log(hi) / log(n_workers)) rounds.
     while lo < hi {
-        let mid = (lo + hi) / 2;
-        let mut clauses = base.clone();
-        add_atmost_k(&mut clauses, mid);
-        match solve_clauses(clauses) {
-            Some(board) => {
-                hi = board.count_live_cells() as usize;
-                best = board;
+        let batch = n_workers.min(hi - lo);
+        let bounds: Vec<usize> = (0..batch)
+            .map(|i| lo + i * (hi - lo) / batch)
+            .collect();
+
+        let (tx, rx) = mpsc::channel::<(usize, Option<Board>)>();
+        for k in bounds {
+            let base = Arc::clone(&base);
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let mut clauses = (*base).clone();
+                add_atmost_k(&mut clauses, k);
+                let _ = tx.send((k, solve_clauses(clauses)));
+            });
+        }
+        drop(tx);
+
+        for (k, result) in rx {
+            match result {
+                Some(board) => {
+                    let count = board.count_live_cells() as usize;
+                    if count < hi {
+                        hi = count;
+                        best = board;
+                    }
+                }
+                None => {
+                    lo = lo.max(k + 1);
+                }
             }
-            None => lo = mid + 1,
         }
     }
 
