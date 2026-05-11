@@ -2,6 +2,7 @@ import init, { WasmApp } from "../wasm/pkg/yawnoc_wasm.js";
 
 let appPromise = null;
 let satWorker = null;
+let pendingPrevId = null;
 
 async function getApp() {
   if (!appPromise) {
@@ -20,6 +21,14 @@ function terminateSatWorker() {
   }
 }
 
+function resolvePendingPrev(app) {
+  if (pendingPrevId !== null) {
+    const frame = JSON.parse(app.frame_json());
+    self.postMessage({ id: pendingPrevId, result: frame });
+    pendingPrevId = null;
+  }
+}
+
 self.addEventListener("message", async (event) => {
   const { id, cmd, args } = event.data;
   try {
@@ -35,12 +44,12 @@ self.addEventListener("message", async (event) => {
       case "pressKey": {
         const key = args.key;
         if (key === "prev") {
-          // Cancel any running search first.
           terminateSatWorker();
-          // Transition app state to Searching (non-blocking).
-          json = app.press_key_json("prev");
+          // Transition to searching state (non-blocking).
+          app.press_key_json("prev");
           const board_json = app.board_json();
-          // Spawn child worker to run SAT off this event loop.
+          // Hold the promise open — resolve it when SAT finishes or is cancelled.
+          pendingPrevId = id;
           satWorker = new Worker(new URL("./sat-worker.js", import.meta.url), {
             type: "module",
           });
@@ -52,11 +61,14 @@ self.addEventListener("message", async (event) => {
             } else {
               innerApp.search_not_found_json();
             }
+            resolvePendingPrev(innerApp);
           });
           satWorker.postMessage({ board_json });
+          return; // Don't post a response yet.
         } else if (key === "cancel") {
           terminateSatWorker();
           json = app.press_key_json("cancel");
+          resolvePendingPrev(app); // Unblock any awaiting pressKey("prev").
         } else {
           json = app.press_key_json(key);
         }
@@ -85,4 +97,5 @@ self.addEventListener("message", async (event) => {
     });
   }
 });
+
 
