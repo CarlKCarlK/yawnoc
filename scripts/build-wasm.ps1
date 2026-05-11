@@ -27,6 +27,7 @@ New-Item -ItemType Directory -Force dist-wasm/src | Out-Null
 New-Item -ItemType Directory -Force dist-wasm/public | Out-Null
 New-Item -ItemType Directory -Force dist-wasm/wasm | Out-Null
 Copy-Item index.html dist-wasm/index.html -Force
+Copy-Item public/manifest.json dist-wasm/manifest.json -Force
 Copy-Item src/* dist-wasm/src -Recurse -Force
 Copy-Item public/* dist-wasm/public -Recurse -Force
 Copy-Item public/sw.js dist-wasm/sw.js -Force

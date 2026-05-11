@@ -15,6 +15,7 @@ wasm-pack build wasm --target web --out-dir pkg --out-name yawnoc_wasm --release
 mkdir -p dist-wasm/src dist-wasm/public dist-wasm/wasm
 
 cp index.html dist-wasm/index.html
+cp public/manifest.json dist-wasm/manifest.json
 cp -r src/. dist-wasm/src/
 cp -r public/. dist-wasm/public/
 cp public/sw.js dist-wasm/sw.js
