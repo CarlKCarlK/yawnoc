@@ -1,16 +1,17 @@
-const CACHE_NAME = "yawnoc-v1";
+const CACHE_NAME = "yawnoc-v4";
 
 // All assets the app needs to work offline after first load.
+// The .wasm binary is cached lazily on first fetch to avoid blocking SW install.
 const PRECACHE = [
   "./",
+  "./manifest.json",
+  "./sw.js",
   "./src/styles.css",
   "./src/main.js",
   "./src/wasm-worker.js",
   "./wasm/pkg/yawnoc_wasm.js",
-  "./wasm/pkg/yawnoc_wasm_bg.wasm",
   "./public/remote.jpg",
   "./public/icon.png",
-  "./public/manifest.json",
 ];
 
 self.addEventListener("install", (event) => {
