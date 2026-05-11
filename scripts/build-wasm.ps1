@@ -17,6 +17,21 @@ if (-not $hasWasmPack) {
     }
 }
 
+$hasPython = $null -ne (Get-Command python -ErrorAction SilentlyContinue)
+$hasPillow = $false
+if ($hasPython) {
+    python -c "from PIL import Image" 2>$null
+    $hasPillow = $LASTEXITCODE -eq 0
+}
+if ($hasPython -and $hasPillow) {
+    python scripts/gen-icon-16.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Icon generation failed."
+    }
+} else {
+    Write-Warning "python/Pillow not found; using any existing small icons."
+}
+
 wasm-pack build wasm --target web --out-dir pkg --out-name yawnoc_wasm --release
 if ($LASTEXITCODE -ne 0) {
     throw "wasm-pack build failed."
@@ -35,5 +50,7 @@ Copy-Item wasm/pkg dist-wasm/wasm -Recurse -Force
 
 # Copy app icon into dist-wasm/public/ for PWA manifest.
 Copy-Item src-tauri/icons/icon.png dist-wasm/public/icon.png -Force
+if (Test-Path public/icon-16.png) { Copy-Item public/icon-16.png dist-wasm/public/icon-16.png -Force }
+if (Test-Path public/icon-32.png) { Copy-Item public/icon-32.png dist-wasm/public/icon-32.png -Force }
 
 Write-Host "WASM web output ready in dist-wasm/."

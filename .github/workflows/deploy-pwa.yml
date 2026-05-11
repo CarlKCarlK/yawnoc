@@ -38,14 +38,11 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
+      - name: Install Pillow
+        run: pip install pillow -q
+
       - name: Build WASM + web output
         run: bash scripts/build-wasm.sh
-
-      - name: Generate crisp 16x16 favicon
-        run: |
-          pip install pillow -q
-          python3 scripts/gen-icon-16.py
-          cp public/icon-16.png dist-wasm/public/icon-16.png
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,4 +1,4 @@
-const CACHE_NAME = "yawnoc-v12";
+const CACHE_NAME = "yawnoc-v13";
 
 // All assets the app needs to work offline after first load.
 // The .wasm binary is cached lazily on first fetch to avoid blocking SW install.
@@ -11,6 +11,8 @@ const PRECACHE = [
   "./src/wasm-worker.js",
   "./wasm/pkg/yawnoc_wasm.js",
   "./public/remote.jpg",
+  "./public/icon-16.png",
+  "./public/icon-32.png",
   "./public/icon.png",
 ];
 

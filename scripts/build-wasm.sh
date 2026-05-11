@@ -10,6 +10,12 @@ if ! command -v wasm-pack &>/dev/null; then
     cargo install wasm-pack --locked
 fi
 
+if command -v python3 &>/dev/null && python3 -c "from PIL import Image" &>/dev/null; then
+    python3 scripts/gen-icon-16.py
+else
+    echo "Warning: python3/Pillow not available; using any existing small icons."
+fi
+
 wasm-pack build wasm --target web --out-dir pkg --out-name yawnoc_wasm --release
 
 mkdir -p dist-wasm/src dist-wasm/public dist-wasm/wasm
@@ -23,5 +29,7 @@ cp -r wasm/pkg dist-wasm/wasm/
 
 # Copy app icon into dist-wasm/public/ for PWA manifest.
 cp src-tauri/icons/icon.png dist-wasm/public/icon.png
+if [ -f public/icon-16.png ]; then cp public/icon-16.png dist-wasm/public/icon-16.png; fi
+if [ -f public/icon-32.png ]; then cp public/icon-32.png dist-wasm/public/icon-32.png; fi
 
 echo "WASM web output ready in dist-wasm/."
