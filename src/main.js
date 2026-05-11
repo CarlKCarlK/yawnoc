@@ -39,6 +39,10 @@ async function createBackend() {
 
   function attachWorkerListener(w) {
     w.addEventListener("message", (event) => {
+      if (event.data.type === "progress") {
+        renderFrame(event.data.frame);
+        return;
+      }
       const { id, result, error } = event.data;
       const request = pending.get(id);
       if (!request) return;

@@ -56,9 +56,11 @@ self.addEventListener("message", async (event) => {
           satWorker.addEventListener("message", async (e) => {
             const innerApp = await getApp();
             if (e.data.type === "progress") {
-              // Show intermediate best board; keep is_searching = true
-              // so tick() renders it in red and doesn't advance the sim.
+              // Show intermediate best board and push it directly to main.js
+              // so it renders immediately rather than waiting for the next tick.
               innerApp.show_progress_json(e.data.result);
+              const frame = JSON.parse(innerApp.frame_json());
+              self.postMessage({ type: "progress", frame });
             } else {
               // type === "done"
               satWorker = null;
