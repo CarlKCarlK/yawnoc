@@ -395,6 +395,7 @@ impl Conway {
             digit if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
                 let pattern_index = (digit.as_bytes()[0] - b'0') as usize;
                 self.pattern_index = pattern_index;
+                self.is_searching = false;
                 self.reset_board_for_pattern();
                 Status::Ok
             }

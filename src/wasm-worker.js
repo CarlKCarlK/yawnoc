@@ -83,6 +83,11 @@ self.addEventListener("message", async (event) => {
           terminateSatWorker();
           json = app.press_key_json("cancel");
           resolvePendingPrev(app); // Unblock any awaiting pressKey("prev").
+        } else if (key.length === 1 && key >= "0" && key <= "9" && satWorker) {
+          // Digit pressed during a search — cancel the search and load the new pattern.
+          terminateSatWorker();
+          json = app.press_key_json(key); // Rust clears is_searching for digit keys
+          resolvePendingPrev(app);
         } else {
           json = app.press_key_json(key);
         }

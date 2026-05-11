@@ -180,7 +180,6 @@ async function handleKey(key) {
     const snapshot = await backend.getState();
     isPrevSearching = true;
     status.textContent = "searching";
-    stopTimer();
     const frameBeforeSearch = await backend.frame();
     renderFrame(frameBeforeSearch);
     try {
