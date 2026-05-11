@@ -598,28 +598,14 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
 
 fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -> Option<Board> {
     let base = build_life_clauses(target);
-    let n = target.count_live_cells() as usize;
 
-    // Start with at-most 2×N live cells; double until a predecessor is found
-    // or we've tried the full board. This gives a sparse first result rather
-    // than whatever an unconstrained solve would produce.
-    let mut cap = (2 * n).max(1);
-    let mut best = loop {
-        let mut clauses = base.clone();
-        add_atmost_k(&mut clauses, cap.min(H * W));
-        if let Some(board) = solve_clauses(clauses) {
-            break board;
-        }
-        if cap >= H * W {
-            return None; // no predecessor exists
-        }
-        cap = (cap * 2).min(H * W);
-    };
-    let mut hi = best.count_live_cells() as usize;
+    // Find any predecessor first (unconstrained — always fast if one exists),
+    // then binary-search downward for the sparsest one.
+    let mut best = solve_clauses(base.clone())?;
     on_progress(&best);
-
-    // Binary search for the sparsest predecessor.
+    let mut hi = best.count_live_cells() as usize;
     let mut lo = 0usize;
+
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         let mut clauses = base.clone();
