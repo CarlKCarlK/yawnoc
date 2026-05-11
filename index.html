@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yawnoc</title>
+    <link rel="manifest" href="./public/manifest.json" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <link rel="icon" type="image/png" sizes="128x128" href="./public/icon-128.png" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
@@ -63,5 +66,10 @@
       <p id="status">loading</p>
     </main>
     <script type="module" src="./src/main.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./public/sw.js");
+      }
+    </script>
   </body>
 </html>

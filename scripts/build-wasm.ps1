@@ -31,4 +31,8 @@ Copy-Item src/* dist-wasm/src -Recurse -Force
 Copy-Item public/* dist-wasm/public -Recurse -Force
 Copy-Item wasm/pkg dist-wasm/wasm -Recurse -Force
 
+# Copy app icons into dist-wasm/public/ for PWA manifest.
+Copy-Item src-tauri/icons/128x128.png dist-wasm/public/icon-128.png -Force
+Copy-Item src-tauri/icons/Square310x310Logo.png dist-wasm/public/icon-512.png -Force
+
 Write-Host "WASM web output ready in dist-wasm/."

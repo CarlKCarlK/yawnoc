@@ -1,0 +1,21 @@
+{
+  "name": "Yawnoc",
+  "short_name": "Yawnoc",
+  "description": "Native Rust Conway Game of Life on a virtual 16x16 LED panel",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "./public/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "./public/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

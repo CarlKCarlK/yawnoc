@@ -15,6 +15,10 @@ win-installer: icons
 wasm-build:
   powershell -ExecutionPolicy Bypass -File .\scripts\build-wasm.ps1
 
+# Use on Linux / macOS / CI
+wasm-build-unix:
+  bash scripts/build-wasm.sh
+
 wasm-serve:
   python -m http.server 4173 --directory dist-wasm
 
