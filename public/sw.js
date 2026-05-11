@@ -1,4 +1,4 @@
-const CACHE_NAME = "yawnoc-v8";
+const CACHE_NAME = "yawnoc-v9";
 
 // All assets the app needs to work offline after first load.
 // The .wasm binary is cached lazily on first fetch to avoid blocking SW install.
