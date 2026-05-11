@@ -63,6 +63,13 @@ self.addEventListener("message", async (event) => {
             }
             resolvePendingPrev(innerApp);
           });
+          satWorker.addEventListener("error", async (e) => {
+            console.error("sat-worker onerror:", e.message);
+            satWorker = null;
+            const innerApp = await getApp();
+            innerApp.search_not_found_json();
+            resolvePendingPrev(innerApp);
+          });
           satWorker.postMessage({ board_json });
           return; // Don't post a response yet.
         } else if (key === "cancel") {

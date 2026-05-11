@@ -6,7 +6,12 @@ let ready = init();
 
 self.addEventListener("message", async (event) => {
   const { board_json } = event.data;
-  await ready;
-  const result = find_predecessor_json(board_json) ?? null;
-  self.postMessage({ result });
+  try {
+    await ready;
+    const result = find_predecessor_json(board_json) ?? null;
+    self.postMessage({ result });
+  } catch (err) {
+    console.error("sat-worker error:", err);
+    self.postMessage({ result: null, error: String(err) });
+  }
 });
