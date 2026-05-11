@@ -19,8 +19,7 @@ cp -r src/. dist-wasm/src/
 cp -r public/. dist-wasm/public/
 cp -r wasm/pkg dist-wasm/wasm/
 
-# Copy app icons into dist-wasm/public/ for PWA manifest.
-cp src-tauri/icons/128x128.png dist-wasm/public/icon-128.png
-cp src-tauri/icons/Square310x310Logo.png dist-wasm/public/icon-512.png
+# Copy app icon into dist-wasm/public/ for PWA manifest.
+cp src-tauri/icons/icon.png dist-wasm/public/icon.png
 
 echo "WASM web output ready in dist-wasm/."

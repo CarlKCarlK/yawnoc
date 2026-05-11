@@ -9,7 +9,7 @@ const PRECACHE = [
   "./wasm/pkg/yawnoc_wasm.js",
   "./wasm/pkg/yawnoc_wasm_bg.wasm",
   "./public/remote.jpg",
-  "./public/icon-128.png",
+  "./public/icon.png",
   "./public/manifest.json",
 ];
 
