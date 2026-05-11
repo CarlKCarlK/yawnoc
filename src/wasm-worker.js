@@ -1,6 +1,7 @@
 import init, { WasmApp } from "../wasm/pkg/yawnoc_wasm.js";
 
 let appPromise = null;
+let satWorker = null;
 
 async function getApp() {
   if (!appPromise) {
@@ -10,6 +11,13 @@ async function getApp() {
     })();
   }
   return appPromise;
+}
+
+function terminateSatWorker() {
+  if (satWorker) {
+    satWorker.terminate();
+    satWorker = null;
+  }
 }
 
 self.addEventListener("message", async (event) => {
@@ -24,9 +32,36 @@ self.addEventListener("message", async (event) => {
       case "tick":
         json = app.tick_json();
         break;
-      case "pressKey":
-        json = app.press_key_json(args.key);
+      case "pressKey": {
+        const key = args.key;
+        if (key === "prev") {
+          // Cancel any running search first.
+          terminateSatWorker();
+          // Transition app state to Searching (non-blocking).
+          json = app.press_key_json("prev");
+          const board_json = app.board_json();
+          // Spawn child worker to run SAT off this event loop.
+          satWorker = new Worker(new URL("./sat-worker.js", import.meta.url), {
+            type: "module",
+          });
+          satWorker.addEventListener("message", async (e) => {
+            satWorker = null;
+            const innerApp = await getApp();
+            if (e.data.result !== null) {
+              innerApp.apply_predecessor_json(e.data.result);
+            } else {
+              innerApp.search_not_found_json();
+            }
+          });
+          satWorker.postMessage({ board_json });
+        } else if (key === "cancel") {
+          terminateSatWorker();
+          json = app.press_key_json("cancel");
+        } else {
+          json = app.press_key_json(key);
+        }
         break;
+      }
       case "toggleCell":
         json = app.toggle_cell_json(args.row, args.col);
         break;
@@ -50,3 +85,4 @@ self.addEventListener("message", async (event) => {
     });
   }
 });
+

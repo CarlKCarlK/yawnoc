@@ -65,6 +65,7 @@ enum Status {
     Found,
     NotFound,
     Cancelled,
+    Searching,
     Off,
     Unknown,
 }
@@ -77,6 +78,7 @@ impl Status {
             Self::Found => "found",
             Self::NotFound => "not_found",
             Self::Cancelled => "cancelled",
+            Self::Searching => "searching",
             Self::Off => "off",
             Self::Unknown => "unknown",
         }
@@ -319,8 +321,8 @@ struct Conway {
     display_power_on: bool,
     speed_mode: SpeedMode,
     color_index: usize,
-    status: Status,
-    stasis_tracker: (u8, u16),
+    status: Status,    #[serde(default)]
+    is_searching: bool,    stasis_tracker: (u8, u16),
     empty_tracker: u8,
     random_seed: u32,
 }
@@ -337,6 +339,7 @@ impl Conway {
             speed_mode: SpeedMode::Medium,
             color_index: 1,
             status: Status::Ok,
+            is_searching: false,
             stasis_tracker: (0, 0),
             empty_tracker: 0,
             random_seed,
@@ -362,20 +365,20 @@ impl Conway {
             }
             "prev" => {
                 if self.display_power_on {
-                    match sat_predecessor(&self.board) {
-                        Some(board) => {
-                            self.board = board;
-                            self.stasis_tracker = (0, 0);
-                            self.empty_tracker = 0;
-                            Status::Found
-                        }
-                        None => Status::NotFound,
-                    }
+                    self.is_searching = true;
+                    Status::Searching
                 } else {
                     Status::Off
                 }
             }
-            "cancel" => Status::Cancelled,
+            "cancel" => {
+                self.is_searching = false;
+                Status::Cancelled
+            }
+            "search_not_found" => {
+                self.is_searching = false;
+                Status::NotFound
+            }
             "mode" => {
                 self.color_index = (self.color_index + 1) % ALIVE_COLORS.len();
                 Status::Ok
@@ -402,6 +405,11 @@ impl Conway {
     fn tick(&mut self) -> Status {
         if !self.display_power_on {
             self.status = Status::Off;
+            return self.status;
+        }
+
+        if self.is_searching {
+            self.status = Status::Searching;
             return self.status;
         }
 
@@ -472,7 +480,11 @@ impl Conway {
         if !self.display_power_on {
             cells.resize(H * W, None);
         } else {
-            let alive_color = ALIVE_COLORS[self.color_index].css();
+            let alive_color = if self.is_searching {
+                Rgb::new(220, 30, 30).css()
+            } else {
+                ALIVE_COLORS[self.color_index].css()
+            };
             for row in 0..H {
                 for col in 0..W {
                     cells.push(self.board.cells[row][col].then(|| alive_color.clone()));
@@ -666,4 +678,34 @@ impl WasmApp {
             Err(_) => false,
         }
     }
+
+    pub fn board_json(&self) -> String {
+        serde_json::to_string(&self.conway.board).expect("failed to serialize board")
+    }
+
+    pub fn apply_predecessor_json(&mut self, board_json: &str) -> String {
+        if let Ok(board) = serde_json::from_str::<Board>(board_json) {
+            self.conway.board = board;
+            self.conway.is_searching = false;
+            self.conway.stasis_tracker = (0, 0);
+            self.conway.empty_tracker = 0;
+            self.conway.status = Status::Found;
+        }
+        serde_json::to_string(&self.conway.frame()).expect("failed to serialize frame")
+    }
+
+    pub fn search_not_found_json(&mut self) -> String {
+        self.conway.is_searching = false;
+        self.conway.status = Status::NotFound;
+        serde_json::to_string(&self.conway.frame()).expect("failed to serialize frame")
+    }
+}
+
+/// Free function used by the SAT web worker — runs the solver and returns the
+/// predecessor board as JSON, or `null` (JS `undefined` → treated as not-found).
+#[wasm_bindgen]
+pub fn find_predecessor_json(board_json: &str) -> Option<String> {
+    let board: Board = serde_json::from_str(board_json).ok()?;
+    let pred = sat_predecessor(&board)?;
+    serde_json::to_string(&pred).ok()
 }
