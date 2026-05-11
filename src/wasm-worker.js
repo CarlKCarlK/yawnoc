@@ -54,14 +54,21 @@ self.addEventListener("message", async (event) => {
             type: "module",
           });
           satWorker.addEventListener("message", async (e) => {
-            satWorker = null;
             const innerApp = await getApp();
-            if (e.data.result !== null) {
-              innerApp.apply_predecessor_json(e.data.result);
+            if (e.data.type === "progress") {
+              // Show intermediate best board; keep is_searching = true
+              // so tick() renders it in red and doesn't advance the sim.
+              innerApp.show_progress_json(e.data.result);
             } else {
-              innerApp.search_not_found_json();
+              // type === "done"
+              satWorker = null;
+              if (e.data.result !== null) {
+                innerApp.apply_predecessor_json(e.data.result);
+              } else {
+                innerApp.search_not_found_json();
+              }
+              resolvePendingPrev(innerApp);
             }
-            resolvePendingPrev(innerApp);
           });
           satWorker.addEventListener("error", async (e) => {
             console.error("sat-worker onerror:", e.message);

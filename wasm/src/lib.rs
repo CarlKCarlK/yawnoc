@@ -1,3 +1,4 @@
+use js_sys::Function;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -591,8 +592,13 @@ fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
 }
 
 fn sat_predecessor(target: &Board) -> Option<Board> {
+    sat_predecessor_with_progress(target, |_| {})
+}
+
+fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -> Option<Board> {
     let base = build_life_clauses(target);
     let mut best = solve_clauses(base.clone())?;
+    on_progress(&best);
     let mut hi = best.count_live_cells() as usize;
     let mut lo = 0usize;
 
@@ -606,6 +612,7 @@ fn sat_predecessor(target: &Board) -> Option<Board> {
                 if count < hi {
                     hi = count;
                     best = board;
+                    on_progress(&best);
                 } else {
                     hi = mid;
                 }
@@ -679,6 +686,13 @@ impl WasmApp {
         }
     }
 
+    pub fn show_progress_json(&mut self, board_json: &str) {
+        if let Ok(board) = serde_json::from_str::<Board>(board_json) {
+            self.conway.board = board;
+            // keep is_searching = true so the tick loop renders in red
+        }
+    }
+
     pub fn board_json(&self) -> String {
         serde_json::to_string(&self.conway.board).expect("failed to serialize board")
     }
@@ -701,11 +715,18 @@ impl WasmApp {
     }
 }
 
-/// Free function used by the SAT web worker — runs the solver and returns the
-/// predecessor board as JSON, or `null` (JS `undefined` → treated as not-found).
+/// Runs the SAT predecessor search, calling `on_progress` with each
+/// intermediate improvement (as board JSON) before returning the final result.
 #[wasm_bindgen]
-pub fn find_predecessor_json(board_json: &str) -> Option<String> {
+pub fn find_predecessor_json_with_progress(
+    board_json: &str,
+    on_progress: &Function,
+) -> Option<String> {
     let board: Board = serde_json::from_str(board_json).ok()?;
-    let pred = sat_predecessor(&board)?;
+    let pred = sat_predecessor_with_progress(&board, |b| {
+        if let Ok(json) = serde_json::to_string(b) {
+            let _ = on_progress.call1(&JsValue::NULL, &JsValue::from_str(&json));
+        }
+    })?;
     serde_json::to_string(&pred).ok()
 }
