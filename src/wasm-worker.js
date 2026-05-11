@@ -64,10 +64,12 @@ self.addEventListener("message", async (event) => {
             } else {
               // type === "done"
               satWorker = null;
-              if (e.data.result !== null) {
+              if (e.data.kind === "found" && e.data.result !== null) {
                 innerApp.apply_predecessor_json(e.data.result);
-              } else {
+              } else if (e.data.kind === "not_found") {
                 innerApp.search_not_found_json();
+              } else {
+                innerApp.search_solver_error_json();
               }
               resolvePendingPrev(innerApp);
             }
@@ -76,7 +78,7 @@ self.addEventListener("message", async (event) => {
             console.error("sat-worker onerror:", e.message);
             satWorker = null;
             const innerApp = await getApp();
-            innerApp.search_not_found_json();
+            innerApp.search_solver_error_json();
             resolvePendingPrev(innerApp);
           });
           satWorker.postMessage({ board_json });

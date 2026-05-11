@@ -11,10 +11,10 @@ self.addEventListener("message", async (event) => {
     const on_progress = (intermediate_board_json) => {
       self.postMessage({ type: "progress", result: intermediate_board_json });
     };
-    const result = find_predecessor_json_with_progress(board_json, on_progress) ?? null;
-    self.postMessage({ type: "done", result });
+    const outcome = JSON.parse(find_predecessor_json_with_progress(board_json, on_progress));
+    self.postMessage({ type: "done", ...outcome });
   } catch (err) {
     console.error("sat-worker error:", err);
-    self.postMessage({ type: "done", result: null, error: String(err) });
+    self.postMessage({ type: "done", kind: "solver_error", result: null, error: String(err) });
   }
 });

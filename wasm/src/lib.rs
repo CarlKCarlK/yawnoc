@@ -65,6 +65,7 @@ enum Status {
     Paused,
     Found,
     NotFound,
+    SolverError,
     Cancelled,
     Searching,
     Off,
@@ -78,6 +79,7 @@ impl Status {
             Self::Paused => "paused",
             Self::Found => "found",
             Self::NotFound => "not_found",
+            Self::SolverError => "solver_error",
             Self::Cancelled => "cancelled",
             Self::Searching => "searching",
             Self::Off => "off",
@@ -380,6 +382,10 @@ impl Conway {
                 self.is_searching = false;
                 Status::NotFound
             }
+            "search_solver_error" => {
+                self.is_searching = false;
+                Status::SolverError
+            }
             "mode" => {
                 self.color_index = (self.color_index + 1) % ALIVE_COLORS.len();
                 Status::Ok
@@ -570,7 +576,19 @@ fn add_atmost_k(clauses: &mut Vec<Vec<i32>>, k: usize) {
     clauses.push(vec![-(n as i32), -r(n - 1, k)]);
 }
 
-fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
+enum SolveOutcome {
+    Sat(Board),
+    NotFound,
+    Error,
+}
+
+enum SearchOutcome {
+    Found(Board),
+    NotFound,
+    Error,
+}
+
+fn solve_clauses(clauses: Vec<Vec<i32>>) -> SolveOutcome {
     let old_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let result = std::panic::catch_unwind(|| splr::Certificate::try_from(clauses));
@@ -586,13 +604,14 @@ fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
                     }
                 }
             }
-            Some(board)
+            SolveOutcome::Sat(board)
         }
-        _ => None,
+        Ok(Ok(_)) => SolveOutcome::NotFound,
+        Ok(Err(_)) | Err(_) => SolveOutcome::Error,
     }
 }
 
-fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -> Option<Board> {
+fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -> SearchOutcome {
     let base = build_life_clauses(target);
 
     // Probe increasingly looser density caps starting at N, then fall back to
@@ -601,13 +620,19 @@ fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -
     let mut cap = n;
     let mut best = loop {
         if cap >= H * W {
-            break solve_clauses(base.clone())?;
+            match solve_clauses(base.clone()) {
+                SolveOutcome::Sat(board) => break board,
+                SolveOutcome::NotFound => return SearchOutcome::NotFound,
+                SolveOutcome::Error => return SearchOutcome::Error,
+            }
         }
 
         let mut constrained = base.clone();
         add_atmost_k(&mut constrained, cap);
-        if let Some(board) = solve_clauses(constrained) {
-            break board;
+        match solve_clauses(constrained) {
+            SolveOutcome::Sat(board) => break board,
+            SolveOutcome::NotFound => {}
+            SolveOutcome::Error => return SearchOutcome::Error,
         }
 
         if cap == 0 {
@@ -625,7 +650,7 @@ fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -
         let mut clauses = base.clone();
         add_atmost_k(&mut clauses, mid);
         match solve_clauses(clauses) {
-            Some(board) => {
+            SolveOutcome::Sat(board) => {
                 let count = board.count_live_cells() as usize;
                 if count < hi {
                     hi = count;
@@ -635,13 +660,14 @@ fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -
                     hi = mid;
                 }
             }
-            None => {
+            SolveOutcome::NotFound => {
                 lo = mid + 1;
             }
+            SolveOutcome::Error => return SearchOutcome::Error,
         }
     }
 
-    Some(best)
+    SearchOutcome::Found(best)
 }
 
 #[derive(Serialize)]
@@ -731,6 +757,12 @@ impl WasmApp {
         self.conway.status = Status::NotFound;
         serde_json::to_string(&self.conway.frame()).expect("failed to serialize frame")
     }
+
+    pub fn search_solver_error_json(&mut self) -> String {
+        self.conway.is_searching = false;
+        self.conway.status = Status::SolverError;
+        serde_json::to_string(&self.conway.frame()).expect("failed to serialize frame")
+    }
 }
 
 /// Runs the SAT predecessor search, calling `on_progress` with each
@@ -739,12 +771,36 @@ impl WasmApp {
 pub fn find_predecessor_json_with_progress(
     board_json: &str,
     on_progress: &Function,
-) -> Option<String> {
-    let board: Board = serde_json::from_str(board_json).ok()?;
-    let pred = sat_predecessor_with_progress(&board, |b| {
-        if let Ok(json) = serde_json::to_string(b) {
-            let _ = on_progress.call1(&JsValue::NULL, &JsValue::from_str(&json));
-        }
-    })?;
-    serde_json::to_string(&pred).ok()
+) -> String {
+    #[derive(Serialize)]
+    struct SearchResponse {
+        kind: &'static str,
+        result: Option<String>,
+    }
+
+    let outcome = match serde_json::from_str::<Board>(board_json) {
+        Ok(board) => sat_predecessor_with_progress(&board, |b| {
+            if let Ok(json) = serde_json::to_string(b) {
+                let _ = on_progress.call1(&JsValue::NULL, &JsValue::from_str(&json));
+            }
+        }),
+        Err(_) => SearchOutcome::Error,
+    };
+
+    let response = match outcome {
+        SearchOutcome::Found(pred) => SearchResponse {
+            kind: "found",
+            result: serde_json::to_string(&pred).ok(),
+        },
+        SearchOutcome::NotFound => SearchResponse {
+            kind: "not_found",
+            result: None,
+        },
+        SearchOutcome::Error => SearchResponse {
+            kind: "solver_error",
+            result: None,
+        },
+    };
+
+    serde_json::to_string(&response).expect("failed to serialize search response")
 }
