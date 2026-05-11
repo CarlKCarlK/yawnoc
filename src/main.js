@@ -181,13 +181,12 @@ async function tick() {
 
 async function handleKey(key) {
   if (key === "prev") {
-    const snapshot = await backend.getState();
     isPrevSearching = true;
     status.textContent = "searching";
     const frameBeforeSearch = await backend.frame();
     renderFrame(frameBeforeSearch);
     try {
-      const frame = await backend.pressKey(key, 30000);
+      const frame = await backend.pressKey(key);
       isPrevSearching = false;
       renderFrame(frame);
       syncTimer(frame);
@@ -195,18 +194,6 @@ async function handleKey(key) {
       return;
     } catch (error) {
       isPrevSearching = false;
-      if (error?.message === "worker_timeout") {
-        backend.restartWorker();
-        const restored = await backend.setState(snapshot);
-        if (!restored) {
-          throw new Error("search timed out and state restore failed");
-        }
-        const restoredFrame = await backend.frame();
-        renderFrame(restoredFrame);
-        syncTimer(restoredFrame);
-        status.textContent = `not_found | timeout | ${restoredFrame.live_cells} live | ${restoredFrame.speed}`;
-        return;
-      }
       throw error;
     }
   }

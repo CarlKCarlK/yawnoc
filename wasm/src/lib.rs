@@ -592,16 +592,30 @@ fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
     }
 }
 
-fn sat_predecessor(target: &Board) -> Option<Board> {
-    sat_predecessor_with_progress(target, |_| {})
-}
-
 fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -> Option<Board> {
     let base = build_life_clauses(target);
 
-    // Find any predecessor first (unconstrained — always fast if one exists),
-    // then binary-search downward for the sparsest one.
-    let mut best = solve_clauses(base.clone())?;
+    // Probe increasingly looser density caps starting at N, then fall back to
+    // one unconstrained solve if none of those caps admits a predecessor.
+    let n = target.count_live_cells() as usize;
+    let mut cap = n;
+    let mut best = loop {
+        if cap >= H * W {
+            break solve_clauses(base.clone())?;
+        }
+
+        let mut constrained = base.clone();
+        add_atmost_k(&mut constrained, cap);
+        if let Some(board) = solve_clauses(constrained) {
+            break board;
+        }
+
+        if cap == 0 {
+            cap = 1;
+        } else {
+            cap = cap.saturating_mul(2);
+        }
+    };
     on_progress(&best);
     let mut hi = best.count_live_cells() as usize;
     let mut lo = 0usize;
