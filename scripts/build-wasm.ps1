@@ -29,6 +29,7 @@ New-Item -ItemType Directory -Force dist-wasm/wasm | Out-Null
 Copy-Item index.html dist-wasm/index.html -Force
 Copy-Item src/* dist-wasm/src -Recurse -Force
 Copy-Item public/* dist-wasm/public -Recurse -Force
+Copy-Item public/sw.js dist-wasm/sw.js -Force
 Copy-Item wasm/pkg dist-wasm/wasm -Recurse -Force
 
 # Copy app icon into dist-wasm/public/ for PWA manifest.

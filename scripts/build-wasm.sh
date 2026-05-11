@@ -17,6 +17,7 @@ mkdir -p dist-wasm/src dist-wasm/public dist-wasm/wasm
 cp index.html dist-wasm/index.html
 cp -r src/. dist-wasm/src/
 cp -r public/. dist-wasm/public/
+cp public/sw.js dist-wasm/sw.js
 cp -r wasm/pkg dist-wasm/wasm/
 
 # Copy app icon into dist-wasm/public/ for PWA manifest.
