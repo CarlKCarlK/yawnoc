@@ -618,21 +618,17 @@ fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -
     // one unconstrained solve if none of those caps admits a predecessor.
     let n = target.count_live_cells() as usize;
     let mut cap = n;
-    let mut best = loop {
-        if cap >= H * W {
-            match solve_clauses(base.clone()) {
-                SolveOutcome::Sat(board) => break board,
-                SolveOutcome::NotFound => return SearchOutcome::NotFound,
-                SolveOutcome::Error => return SearchOutcome::Error,
-            }
-        }
-
+    let mut best = None;
+    while cap < H * W {
         let mut constrained = base.clone();
         add_atmost_k(&mut constrained, cap);
         match solve_clauses(constrained) {
-            SolveOutcome::Sat(board) => break board,
+            SolveOutcome::Sat(board) => {
+                best = Some(board);
+                break;
+            }
             SolveOutcome::NotFound => {}
-            SolveOutcome::Error => return SearchOutcome::Error,
+            SolveOutcome::Error => break,
         }
 
         if cap == 0 {
@@ -640,6 +636,15 @@ fn sat_predecessor_with_progress(target: &Board, on_progress: impl Fn(&Board)) -
         } else {
             cap = cap.saturating_mul(2);
         }
+    }
+
+    let mut best = match best {
+        Some(board) => board,
+        None => match solve_clauses(base.clone()) {
+            SolveOutcome::Sat(board) => board,
+            SolveOutcome::NotFound => return SearchOutcome::NotFound,
+            SolveOutcome::Error => return SearchOutcome::Error,
+        },
     };
     on_progress(&best);
     let mut hi = best.count_live_cells() as usize;
