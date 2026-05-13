@@ -12,3 +12,6 @@ src-tauri/icons/*
 /yawnoc-core/target
 /yawnoc-core/Cargo.lock
 /dist-wasm
+/leptos-ui/target
+/leptos-ui/dist
+/leptos-ui/.trunk
