@@ -9,4 +9,6 @@ src-tauri/icons/*
 !src-tauri/icons/icon.png
 /wasm/pkg
 /wasm/target
+/yawnoc-core/target
+/yawnoc-core/Cargo.lock
 /dist-wasm

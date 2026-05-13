@@ -27,12 +27,6 @@ try {
     }
 }
 
-# Generate platform icon assets from the canonical source icon.
-cargo tauri icon src-tauri/icons/icon.png
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to generate icon assets."
-}
-
 cargo tauri build --bundles nsis -- --target-dir ../target/app
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to build NSIS installer."

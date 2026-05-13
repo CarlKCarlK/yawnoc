@@ -1,13 +1,9 @@
 use serde::Serialize;
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use yawnoc_core::{sat_predecessor_with_progress, Board, Pattern, SearchOutcome, H, PATTERNS, W};
 
-const H: usize = 16;
-const W: usize = 16;
 const STASIS_RESET_GENERATIONS: u8 = 15;
-const SAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 const ALIVE_COLORS: [Rgb; 6] = [
     Rgb::new(0, 255, 0),
@@ -36,39 +32,13 @@ impl Rgb {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Pattern {
-    Glider,
-    Random,
-    Blinker,
-    Toad,
-    Beacon,
-    Lwss,
-    Block,
-    Pentadecathlon,
-    Cross,
-    Custom9,
-}
-
-const PATTERNS: [Pattern; 10] = [
-    Pattern::Glider,
-    Pattern::Random,
-    Pattern::Blinker,
-    Pattern::Toad,
-    Pattern::Beacon,
-    Pattern::Lwss,
-    Pattern::Block,
-    Pattern::Pentadecathlon,
-    Pattern::Cross,
-    Pattern::Custom9,
-];
-
-#[derive(Clone, Copy, Debug)]
 enum Status {
     Ok,
     Paused,
     Searching,
     Found,
     NotFound,
+    SolverError,
     Cancelled,
     Off,
     Unknown,
@@ -82,6 +52,7 @@ impl Status {
             Self::Searching => "searching",
             Self::Found => "found",
             Self::NotFound => "not_found",
+            Self::SolverError => "solver_error",
             Self::Cancelled => "cancelled",
             Self::Off => "off",
             Self::Unknown => "unknown",
@@ -130,198 +101,15 @@ impl SpeedMode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Board {
-    cells: [[bool; W]; H],
-}
-
-impl Board {
-    const fn new() -> Self {
-        Self {
-            cells: [[false; W]; H],
-        }
-    }
-
-    fn step(&mut self) {
-        let mut next = [[false; W]; H];
-        for row in 0..H {
-            for col in 0..W {
-                let live_neighbors = self.count_live_neighbors(row, col);
-                let alive = self.cells[row][col];
-                next[row][col] =
-                    matches!((alive, live_neighbors), (true, 2) | (true, 3) | (false, 3));
-            }
-        }
-        self.cells = next;
-    }
-
-    fn count_live_neighbors(&self, row: usize, col: usize) -> u8 {
-        let mut count = 0;
-        for row_offset in [-1, 0, 1] {
-            for col_offset in [-1, 0, 1] {
-                if row_offset == 0 && col_offset == 0 {
-                    continue;
-                }
-                let neighbor_row = ((row as isize + row_offset).rem_euclid(H as isize)) as usize;
-                let neighbor_col = ((col as isize + col_offset).rem_euclid(W as isize)) as usize;
-                if self.cells[neighbor_row][neighbor_col] {
-                    count += 1;
-                }
-            }
-        }
-        count
-    }
-
-    fn count_live_cells(&self) -> u16 {
-        self.cells.iter().flatten().filter(|&&alive| alive).count() as u16
-    }
-
-    fn set_alive(&mut self, row: usize, col: usize) {
-        self.cells[row % H][col % W] = true;
-    }
-
-    fn add_pattern(&mut self, pattern: Pattern, random_seed: u32) {
-        match pattern {
-            Pattern::Glider => self.add_glider(4, 2),
-            Pattern::Random => self.add_random(random_seed),
-            Pattern::Blinker => self.add_blinker(5, 4),
-            Pattern::Toad => self.add_toad(5, 4),
-            Pattern::Beacon => self.add_beacon(4, 4),
-            Pattern::Lwss => self.add_lwss(5, 6),
-            Pattern::Block => self.add_block(5, 4),
-            Pattern::Pentadecathlon => self.add_pentadecathlon(),
-            Pattern::Cross => self.add_cross(7, 7),
-            Pattern::Custom9 => self.add_custom9(),
-        }
-    }
-
-    fn add_glider(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col + 1);
-        self.set_alive(row + 1, col + 2);
-        self.set_alive(row + 2, col);
-        self.set_alive(row + 2, col + 1);
-        self.set_alive(row + 2, col + 2);
-    }
-
-    fn add_blinker(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col);
-        self.set_alive(row, col + 1);
-        self.set_alive(row, col + 2);
-    }
-
-    fn add_toad(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col + 1);
-        self.set_alive(row, col + 2);
-        self.set_alive(row, col + 3);
-        self.set_alive(row + 1, col);
-        self.set_alive(row + 1, col + 1);
-        self.set_alive(row + 1, col + 2);
-    }
-
-    fn add_beacon(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col);
-        self.set_alive(row, col + 1);
-        self.set_alive(row + 1, col);
-        self.set_alive(row + 1, col + 1);
-        self.set_alive(row + 2, col + 2);
-        self.set_alive(row + 2, col + 3);
-        self.set_alive(row + 3, col + 2);
-        self.set_alive(row + 3, col + 3);
-    }
-
-    fn add_lwss(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col + 1);
-        self.set_alive(row + 1, col);
-        self.set_alive(row + 2, col);
-        self.set_alive(row + 2, col + 1);
-        self.set_alive(row + 2, col + 2);
-        self.set_alive(row + 2, col + 3);
-        self.set_alive(row + 1, col + 3);
-    }
-
-    fn add_block(&mut self, row: usize, col: usize) {
-        self.set_alive(row, col);
-        self.set_alive(row, col + 1);
-        self.set_alive(row + 1, col);
-        self.set_alive(row + 1, col + 1);
-    }
-
-    fn add_cross(&mut self, row: usize, col: usize) {
-        for c in 0..W {
-            self.set_alive(row, c);
-        }
-        for r in 0..H {
-            self.set_alive(r, col);
-        }
-    }
-
-    fn add_random(&mut self, mut random_seed: u32) {
-        for row in 0..H {
-            for col in 0..W {
-                random_seed = random_seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                self.cells[row][col] = (random_seed & 0x100) != 0;
-            }
-        }
-    }
-
-    fn add_pentadecathlon(&mut self) {
-        self.draw_ascii(&[
-            "................",
-            "................",
-            "................",
-            "......###.......",
-            ".....#...#......",
-            "................",
-            "....#.....#.....",
-            "....#.....#.....",
-            "................",
-            ".....#...#......",
-            "......###.......",
-            "................",
-            "................",
-            "................",
-            "................",
-            "................",
-        ]);
-    }
-
-    fn add_custom9(&mut self) {
-        self.draw_ascii(&[
-            "................",
-            "...##.....##....",
-            "....##...##.....",
-            ".#..#.#.#.#..#..",
-            ".###.##.##.###..",
-            "..#.#.#.#.#.#...",
-            "...###...###....",
-            "................",
-            "...###...###....",
-            "..#.#.#.#.#.#...",
-            ".###.##.##.###..",
-            ".#..#.#.#.#..#..",
-            "....##...##.....",
-            "...##.....##....",
-            "................",
-            "................",
-        ]);
-    }
-
-    fn draw_ascii(&mut self, rows: &[&str]) {
-        for (row, text) in rows.iter().enumerate() {
-            for (col, ch) in text.chars().enumerate() {
-                if ch == '#' {
-                    self.set_alive(row, col);
-                }
-            }
-        }
-    }
+enum SearchMessage {
+    Progress(Board),
+    Done(SearchOutcome),
 }
 
 struct Conway {
     board: Board,
     pattern_index: usize,
-    search_rx: Option<Receiver<Option<Board>>>,
-    search_start: Option<Instant>,
+    search_rx: Option<Receiver<SearchMessage>>,
     paused: bool,
     display_power_on: bool,
     speed_mode: SpeedMode,
@@ -340,7 +128,6 @@ impl Conway {
             board,
             pattern_index: 1,
             search_rx: None,
-            search_start: None,
             paused: false,
             display_power_on: true,
             speed_mode: SpeedMode::Medium,
@@ -355,7 +142,6 @@ impl Conway {
     fn command(&mut self, key: &str) -> Status {
         if self.search_rx.is_some() {
             self.search_rx = None;
-            self.search_start = None;
             if matches!(key, "prev" | "cancel") {
                 self.status = Status::Cancelled;
                 return self.status;
@@ -380,13 +166,7 @@ impl Conway {
             }
             "prev" => {
                 if self.display_power_on {
-                    let target = self.board;
-                    let (tx, rx) = mpsc::channel();
-                    std::thread::spawn(move || {
-                        let _ = tx.send(sat_predecessor(&target));
-                    });
-                    self.search_rx = Some(rx);
-                    self.search_start = Some(Instant::now());
+                    self.start_search();
                     Status::Searching
                 } else {
                     Status::Off
@@ -394,7 +174,6 @@ impl Conway {
             }
             "cancel" => {
                 self.search_rx = None;
-                self.search_start = None;
                 Status::Cancelled
             }
             "mode" => {
@@ -427,36 +206,7 @@ impl Conway {
         }
 
         if self.search_rx.is_some() {
-            let result = self.search_rx.as_ref().unwrap().try_recv();
-            self.status = match result {
-                Ok(Some(board)) => {
-                    self.board = board;
-                    self.search_rx = None;
-                    self.search_start = None;
-                    self.stasis_tracker = (0, 0);
-                    self.empty_tracker = 0;
-                    Status::Found
-                }
-                Ok(None) => {
-                    self.search_rx = None;
-                    self.search_start = None;
-                    Status::NotFound
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    if self.search_start.map_or(false, |t| t.elapsed() >= SAT_TIMEOUT) {
-                        self.search_rx = None;
-                        self.search_start = None;
-                        Status::NotFound
-                    } else {
-                        Status::Searching
-                    }
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.search_rx = None;
-                    self.search_start = None;
-                    Status::NotFound
-                }
-            };
+            self.poll_search();
             return self.status;
         }
 
@@ -479,7 +229,6 @@ impl Conway {
         self.stasis_tracker = (0, 0);
         self.empty_tracker = 0;
         self.search_rx = None;
-        self.search_start = None;
     }
 
     fn evaluate_auto_reset(&mut self) {
@@ -551,152 +300,56 @@ impl Conway {
             speed: self.speed_mode.as_str(),
         }
     }
-}
 
-fn build_life_clauses(target: &Board) -> Vec<Vec<i32>> {
-    let mut clauses = Vec::new();
-    for row in 0..H {
-        for col in 0..W {
-            let target_alive = target.cells[row][col];
-            let nb: [(usize, usize); 9] = [
-                ((row + H - 1) % H, (col + W - 1) % W),
-                ((row + H - 1) % H, col),
-                ((row + H - 1) % H, (col + 1) % W),
-                (row, (col + W - 1) % W),
-                (row, col),
-                (row, (col + 1) % W),
-                ((row + 1) % H, (col + W - 1) % W),
-                ((row + 1) % H, col),
-                ((row + 1) % H, (col + 1) % W),
-            ];
-            for bits in 0u16..512 {
-                let center = (bits >> 4) & 1;
-                let neighbor_sum: u16 =
-                    (0u16..9).filter(|&j| j != 4).map(|j| (bits >> j) & 1).sum();
-                let produces_alive = (center == 1 && (neighbor_sum == 2 || neighbor_sum == 3))
-                    || (center == 0 && neighbor_sum == 3);
-                if produces_alive != target_alive {
-                    let clause: Vec<i32> = nb
-                        .iter()
-                        .enumerate()
-                        .map(|(j, &(nr, nc))| {
-                            let var = (nr * W + nc + 1) as i32;
-                            if (bits >> j) & 1 == 1 { -var } else { var }
-                        })
-                        .collect();
-                    clauses.push(clause);
-                }
-            }
-        }
-    }
-    clauses
-}
-
-/// Sequential-counter at-most-k constraint over SAT vars 1..=(H*W).
-/// Auxiliary vars are numbered starting at H*W+1.
-/// r(i,j) = "count(x[1..i]) >= j", for i=1..n-1, j=1..k.
-fn add_atmost_k(clauses: &mut Vec<Vec<i32>>, k: usize) {
-    let n = H * W;
-    if k == 0 {
-        for i in 1..=(n as i32) {
-            clauses.push(vec![-i]);
-        }
-        return;
-    }
-    if k >= n {
-        return;
-    }
-    let r = |i: usize, j: usize| -> i32 { (n + (i - 1) * k + j) as i32 };
-    // i=1: x[1] → r[1][1]
-    clauses.push(vec![-1, r(1, 1)]);
-    for i in 2..n {
-        // propagate count ≥ 1
-        clauses.push(vec![-(i as i32), r(i, 1)]);
-        clauses.push(vec![-r(i - 1, 1), r(i, 1)]);
-        // propagate count ≥ j for j=2..k
-        for j in 2..=k {
-            clauses.push(vec![-(i as i32), -r(i - 1, j - 1), r(i, j)]);
-            clauses.push(vec![-r(i - 1, j), r(i, j)]);
-        }
-        // overflow: x[i]=1 forbidden when count already at k
-        clauses.push(vec![-(i as i32), -r(i - 1, k)]);
-    }
-    // overflow for x[n]
-    clauses.push(vec![-(n as i32), -r(n - 1, k)]);
-}
-
-fn solve_clauses(clauses: Vec<Vec<i32>>) -> Option<Board> {
-    // splr has an internal sort bug that can panic with "comparison function does not
-    // implement total order".  Silence the hook so the message doesn't appear in the
-    // terminal, then catch_unwind absorbs the actual unwind.
-    let old_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let result = std::panic::catch_unwind(|| splr::Certificate::try_from(clauses));
-    std::panic::set_hook(old_hook);
-    match result {
-        Ok(Ok(splr::Certificate::SAT(ans))) => {
-            let mut board = Board::new();
-            for &lit in &ans {
-                if lit > 0 {
-                    let idx = (lit - 1) as usize;
-                    if idx < H * W {
-                        board.cells[idx / W][idx % W] = true;
-                    }
-                }
-            }
-            Some(board)
-        }
-        _ => None,
-    }
-}
-
-fn sat_predecessor(target: &Board) -> Option<Board> {
-    let base = Arc::new(build_life_clauses(target));
-    let n_workers = std::thread::available_parallelism().map_or(4, |p| p.get());
-
-    // Unconstrained solve – confirms a predecessor exists and gives first upper bound.
-    let mut best = solve_clauses((*base).clone())?;
-    let mut hi = best.count_live_cells() as usize; // have a solution with hi live cells
-    let mut lo = 0usize;                            // proven UNSAT for all counts < lo
-
-    // Each round spawns up to n_workers threads probing evenly-spaced bounds in [lo, hi).
-    // SAT(k) → upper bound tightens to actual count; UNSAT(k) → lower bound advances past k.
-    // Converges in O(log(hi) / log(n_workers)) rounds.
-    while lo < hi {
-        let batch = n_workers.min(hi - lo);
-        let bounds: Vec<usize> = (0..batch)
-            .map(|i| lo + i * (hi - lo) / batch)
-            .collect();
-
-        let (tx, rx) = mpsc::channel::<(usize, Option<Board>)>();
-        for k in bounds {
-            let base = Arc::clone(&base);
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                let mut clauses = (*base).clone();
-                add_atmost_k(&mut clauses, k);
-                let _ = tx.send((k, solve_clauses(clauses)));
+    fn start_search(&mut self) {
+        let target = self.board;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let outcome = sat_predecessor_with_progress(&target, |board| {
+                let _ = tx.send(SearchMessage::Progress(*board));
             });
-        }
-        drop(tx);
+            let _ = tx.send(SearchMessage::Done(outcome));
+        });
+        self.search_rx = Some(rx);
+    }
 
-        for (k, result) in rx {
-            match result {
-                Some(board) => {
-                    let count = board.count_live_cells() as usize;
-                    if count < hi {
-                        hi = count;
-                        best = board;
-                    }
+    fn poll_search(&mut self) {
+        while let Some(rx) = self.search_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(SearchMessage::Progress(board)) => {
+                    self.board = board;
+                    self.status = Status::Searching;
                 }
-                None => {
-                    lo = lo.max(k + 1);
+                Ok(SearchMessage::Done(SearchOutcome::Found(board))) => {
+                    self.board = board;
+                    self.search_rx = None;
+                    self.stasis_tracker = (0, 0);
+                    self.empty_tracker = 0;
+                    self.status = Status::Found;
+                    return;
+                }
+                Ok(SearchMessage::Done(SearchOutcome::NotFound)) => {
+                    self.search_rx = None;
+                    self.status = Status::NotFound;
+                    return;
+                }
+                Ok(SearchMessage::Done(SearchOutcome::Error)) => {
+                    self.search_rx = None;
+                    self.status = Status::SolverError;
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    self.status = Status::Searching;
+                    return;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.search_rx = None;
+                    self.status = Status::SolverError;
+                    return;
                 }
             }
         }
     }
-
-    Some(best)
 }
 
 #[tauri::command]
@@ -747,7 +400,12 @@ fn main() {
         .manage(AppState {
             conway: Mutex::new(Conway::new(0x9e37_79b9)),
         })
-        .invoke_handler(tauri::generate_handler![frame, tick, press_key, toggle_cell])
+        .invoke_handler(tauri::generate_handler![
+            frame,
+            tick,
+            press_key,
+            toggle_cell
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

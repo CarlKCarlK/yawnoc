@@ -4867,9 +4867,17 @@ name = "yawnoc"
 version = "0.1.0"
 dependencies = [
  "serde",
- "splr",
  "tauri",
  "tauri-build",
+ "yawnoc-core",
+]
+
+[[package]]
+name = "yawnoc-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "splr",
 ]
 
 [[package]]

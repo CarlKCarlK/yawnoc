@@ -210,14 +210,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "yawnoc-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "splr",
+]
+
+[[package]]
 name = "yawnoc-wasm"
 version = "0.1.0"
 dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "splr",
  "wasm-bindgen",
+ "yawnoc-core",
 ]
 
 [[package]]

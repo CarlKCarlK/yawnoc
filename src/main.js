@@ -16,7 +16,7 @@ const status = document.querySelector("#status");
 const ctx = panel.getContext("2d");
 let tickTimer = null;
 let backend = null;
-let isPrevSearching = false;
+let searchRunId = 0;
 
 async function createBackend() {
   if (window.__TAURI__?.core?.invoke) {
@@ -114,6 +114,7 @@ function drawLed(ctx, x, y, size, color, alive) {
 }
 
 function renderFrame(frame) {
+  const searching = frame.status === "searching";
   const width = panel.width;
   const height = panel.height;
   const padding = 26;
@@ -134,7 +135,7 @@ function renderFrame(frame) {
     for (let col = 0; col < frame.width; col += 1) {
       const index = row * frame.width + col;
       const rawColor = frame.cells[index];
-      const color = rawColor === null ? null : (isPrevSearching ? "#dc1e1e" : rawColor);
+      const color = rawColor === null ? null : (searching ? "#dc1e1e" : rawColor);
       drawLed(ctx, padding + col * cell, padding + row * cell, cell, color, color !== null);
     }
   }
@@ -179,26 +180,56 @@ async function tick() {
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function asSearchingFrame(frame) {
+  return { ...frame, status: "searching" };
+}
+
+async function pollSearchUntilDone(runId) {
+  while (runId === searchRunId) {
+    await sleep(50);
+    if (runId !== searchRunId) {
+      return null;
+    }
+    const frame = await backend.tick();
+    if (runId !== searchRunId) {
+      return null;
+    }
+    renderFrame(frame);
+    status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
+    if (frame.status !== "searching") {
+      syncTimer(frame);
+      return frame;
+    }
+  }
+  return null;
+}
+
 async function handleKey(key) {
+  if (key !== "prev") {
+    searchRunId += 1;
+  }
   if (key === "prev") {
-    isPrevSearching = true;
+    const runId = searchRunId + 1;
+    searchRunId = runId;
     status.textContent = "searching";
     const frameBeforeSearch = await backend.frame();
-    renderFrame(frameBeforeSearch);
+    renderFrame(asSearchingFrame(frameBeforeSearch));
     try {
       const frame = await backend.pressKey(key);
-      isPrevSearching = false;
       renderFrame(frame);
       syncTimer(frame);
       status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;
+      if (frame.status === "searching") {
+        await pollSearchUntilDone(runId);
+      }
       return;
     } catch (error) {
-      isPrevSearching = false;
       throw error;
     }
   }
   const frame = await backend.pressKey(key);
-  isPrevSearching = false;
   renderFrame(frame);
   syncTimer(frame);
   status.textContent = `${frame.status} | ${frame.live_cells} live | ${frame.speed}`;

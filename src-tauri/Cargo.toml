@@ -9,6 +9,5 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-splr = "0.17.2"
 tauri = { version = "2", features = [] }
-
+yawnoc-core = { path = "../yawnoc-core" }
